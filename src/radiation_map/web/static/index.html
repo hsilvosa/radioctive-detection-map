@@ -1,0 +1,997 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Global Radiation Anomaly Map & Spatial Regressor | Safecast</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        :root {
+            --bg-primary: #070a12;
+            --bg-card: rgba(13, 19, 33, 0.88);
+            --bg-card-border: rgba(255, 255, 255, 0.1);
+            --accent-glow: #00f2a6;
+            --accent-subtle: rgba(0, 242, 166, 0.15);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --severity-normal: #10b981;
+            --severity-elevated: #f59e0b;
+            --severity-high: #f97316;
+            --severity-critical: #ef4444;
+            --radius-lg: 16px;
+            --radius-md: 10px;
+            --font-main: 'Inter', -apple-system, sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-main);
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Header */
+        header {
+            height: 64px;
+            background: rgba(10, 15, 29, 0.95);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--bg-card-border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+            z-index: 1000;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-icon {
+            width: 32px;
+            height: 32px;
+            background: radial-gradient(circle, var(--accent-glow) 0%, #064e3b 100%);
+            border-radius: 50%;
+            box-shadow: 0 0 16px var(--accent-glow);
+        }
+
+        .brand h1 {
+            font-size: 1.1rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        .brand span {
+            font-size: 0.75rem;
+            color: var(--accent-glow);
+            background: var(--accent-subtle);
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-family: var(--font-mono);
+            font-weight: 600;
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .btn-nav {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: var(--text-primary);
+            font-size: 0.82rem;
+            font-weight: 600;
+            padding: 7px 14px;
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-nav:hover {
+            background: rgba(255, 255, 255, 0.16);
+            border-color: var(--accent-glow);
+            color: var(--accent-glow);
+        }
+
+        /* Layout */
+        .workspace {
+            display: flex;
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #map {
+            flex: 1;
+            height: 100%;
+            background: #090d16;
+            z-index: 1;
+        }
+
+        /* Sidebar Panels */
+        .sidebar {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            bottom: 20px;
+            width: 420px;
+            max-width: calc(100vw - 40px);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            pointer-events: none;
+        }
+
+        .glass-panel {
+            background: var(--bg-card);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid var(--bg-card-border);
+            border-radius: var(--radius-lg);
+            padding: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+            pointer-events: auto;
+            overflow-y: auto;
+        }
+
+        .glass-panel h2 {
+            font-size: 0.88rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        /* Radiation Reading Card */
+        .dose-hud {
+            text-align: center;
+            padding: 16px;
+            background: rgba(0, 0, 0, 0.45);
+            border-radius: var(--radius-md);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            margin-bottom: 16px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .dose-value {
+            font-family: var(--font-mono);
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: var(--accent-glow);
+            line-height: 1.1;
+            text-shadow: 0 0 20px rgba(0, 242, 166, 0.4);
+            transition: all 0.3s ease;
+        }
+
+        .dose-unit {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-top: 4px;
+        }
+
+        .dose-ci {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 6px;
+        }
+
+        /* Telemetry Grid */
+        .telemetry-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .telemetry-item {
+            background: rgba(255, 255, 255, 0.03);
+            padding: 10px 12px;
+            border-radius: var(--radius-md);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+        }
+
+        .telemetry-label {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .telemetry-val {
+            font-family: var(--font-mono);
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        /* Severity Badge */
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            font-family: var(--font-mono);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .badge-normal { background: rgba(16, 185, 129, 0.15); color: var(--severity-normal); border: 1px solid var(--severity-normal); }
+        .badge-elevated { background: rgba(245, 158, 11, 0.15); color: var(--severity-elevated); border: 1px solid var(--severity-elevated); }
+        .badge-high { background: rgba(249, 115, 22, 0.15); color: var(--severity-high); border: 1px solid var(--severity-high); }
+        .badge-critical { background: rgba(239, 68, 68, 0.25); color: var(--severity-critical); border: 1px solid var(--severity-critical); box-shadow: 0 0 14px rgba(239, 68, 68, 0.6); }
+
+        /* Anomaly Simulator Controls */
+        .form-group {
+            margin-bottom: 12px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+
+        .input-row {
+            display: flex;
+            gap: 8px;
+        }
+
+        input[type="number"], select {
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid var(--bg-card-border);
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 0.9rem;
+            padding: 8px 12px;
+            border-radius: var(--radius-md);
+            outline: none;
+            width: 100%;
+            transition: border-color 0.2s ease;
+        }
+
+        input[type="number"]:focus, select:focus {
+            border-color: var(--accent-glow);
+        }
+
+        .btn-primary {
+            background: var(--accent-glow);
+            color: #032015;
+            font-weight: 600;
+            font-size: 0.85rem;
+            padding: 10px 16px;
+            border-radius: var(--radius-md);
+            border: none;
+            cursor: pointer;
+            width: 100%;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 14px rgba(0, 242, 166, 0.3);
+        }
+
+        .btn-primary:hover {
+            background: #26ffb8;
+            transform: translateY(-1px);
+        }
+
+        /* Hotspot Quick Navigation */
+        .hotspot-pills {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 10px;
+        }
+
+        .hotspot-pill {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            padding: 5px 10px;
+            border-radius: 999px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .hotspot-pill:hover {
+            background: var(--accent-subtle);
+            border-color: var(--accent-glow);
+            color: var(--accent-glow);
+        }
+
+        .hotspot-pill.active {
+            background: var(--accent-subtle);
+            border-color: var(--accent-glow);
+            color: var(--accent-glow);
+            font-weight: 600;
+        }
+
+        /* Map Legend */
+        .map-legend {
+            position: absolute;
+            bottom: 24px;
+            right: 24px;
+            background: var(--bg-card);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--bg-card-border);
+            border-radius: var(--radius-md);
+            padding: 14px 18px;
+            z-index: 1000;
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+        }
+
+        .map-legend h4 {
+            font-size: 0.8rem;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .legend-gradient {
+            width: 200px;
+            height: 10px;
+            border-radius: 5px;
+            background: linear-gradient(to right, #10b981, #06b6d4, #f59e0b, #f97316, #ef4444);
+            margin-bottom: 6px;
+        }
+
+        .legend-labels {
+            display: flex;
+            justify-content: space-between;
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            color: var(--text-muted);
+        }
+
+        /* Modal for Model Evaluation */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(10px);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .modal-content {
+            background: #0d1322;
+            border: 1px solid var(--bg-card-border);
+            border-radius: var(--radius-lg);
+            width: 820px;
+            max-width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            padding: 28px;
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.8);
+        }
+
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid var(--bg-card-border);
+        }
+
+        .modal-header h3 {
+            font-size: 1.2rem;
+            font-weight: 700;
+        }
+
+        .btn-close {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 1.5rem;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+
+        .btn-close:hover {
+            color: var(--text-primary);
+        }
+
+        table.eval-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+            margin-bottom: 20px;
+        }
+
+        table.eval-table th {
+            text-align: left;
+            padding: 10px 12px;
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--text-secondary);
+            font-weight: 600;
+            border-bottom: 1px solid var(--bg-card-border);
+        }
+
+        table.eval-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            font-family: var(--font-mono);
+            color: var(--text-primary);
+        }
+
+        /* Interactive Crosshair Reticle on Click */
+        .probe-halo {
+            border-radius: 50%;
+            animation: probe-ripple 1.5s ease-out infinite;
+            pointer-events: none;
+        }
+
+        @keyframes probe-ripple {
+            0% { transform: scale(0.6); opacity: 1.0; }
+            100% { transform: scale(2.0); opacity: 0.0; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="brand">
+            <div class="brand-icon"></div>
+            <h1>Global Radiation Anomaly Map</h1>
+            <span>SpatialHarmonicNet v0.1</span>
+        </div>
+        <div class="header-actions">
+            <button class="btn-nav" id="btn-toggle-choropleth">Toggle Regional Tint</button>
+            <button class="btn-nav" id="btn-toggle-sensors">Toggle Safecast Sensors</button>
+            <button class="btn-nav" id="btn-open-eval">Model Evaluation & Metrics</button>
+        </div>
+    </header>
+
+    <div class="workspace">
+        <div id="map"></div>
+
+        <!-- Map Legend -->
+        <div class="map-legend">
+            <h4>Radiation Intensity (&mu;Sv/h)</h4>
+            <div class="legend-gradient"></div>
+            <div class="legend-labels">
+                <span>0.03 (Normal)</span>
+                <span>0.15</span>
+                <span>0.30</span>
+                <span>0.60+ (Hotspot)</span>
+            </div>
+            <div style="margin-top: 8px; font-size: 0.72rem; color: #64748b;">
+                Click any point on Earth to run spatial regression.
+            </div>
+        </div>
+
+        <div class="sidebar">
+            <!-- Live Radiation Telemetry Panel -->
+            <div class="glass-panel">
+                <h2>
+                    <span>Spatial Estimation</span>
+                    <span id="coord-label" style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted);">Click Map to Inspect</span>
+                </h2>
+
+                <div class="dose-hud">
+                    <div class="dose-value" id="pred-dose">0.0846</div>
+                    <div class="dose-unit">&mu;Sv/h Ambient Radiation</div>
+                    <div class="dose-ci" id="pred-ci">95% CI: [0.0005, 0.2390] &mu;Sv/h</div>
+                </div>
+
+                <div class="telemetry-grid">
+                    <div class="telemetry-item">
+                        <div class="telemetry-label">Latitude / Longitude</div>
+                        <div class="telemetry-val" id="lat-lon-val">35.6938, 139.7034</div>
+                    </div>
+                    <div class="telemetry-item">
+                        <div class="telemetry-label">Uncertainty (&sigma;)</div>
+                        <div class="telemetry-val" id="unc-val">&plusmn; 0.0573 &mu;Sv/h</div>
+                    </div>
+                    <div class="telemetry-item">
+                        <div class="telemetry-label">Anomaly Status</div>
+                        <div class="telemetry-val"><span id="severity-badge" class="badge badge-normal">NORMAL</span></div>
+                    </div>
+                    <div class="telemetry-item">
+                        <div class="telemetry-label">Z-Score / P-Value</div>
+                        <div class="telemetry-val" id="zscore-val">Z=0.00 (p=5.00e-1)</div>
+                    </div>
+                </div>
+
+                <!-- Anomaly Simulator -->
+                <div style="border-top: 1px solid var(--bg-card-border); padding-top: 14px; margin-top: 10px;">
+                    <h2>Simulate Observation</h2>
+                    <div class="form-group">
+                        <label>Simulated Sensor Reading at this Location</label>
+                        <div class="input-row">
+                            <input type="number" id="sim-value" value="0.085" step="0.01" min="0.001">
+                            <select id="sim-unit" style="width: 110px;">
+                                <option value="usv">&mu;Sv/h</option>
+                                <option value="cpm">CPM</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button class="btn-primary" id="btn-simulate">Evaluate Anomaly Likelihood</button>
+                    <div id="sim-description" style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 10px; line-height: 1.4;">
+                        Select a point on the globe or pick a landmark below.
+                    </div>
+                </div>
+
+                <!-- Quick Landmarks -->
+                <div style="border-top: 1px solid var(--bg-card-border); padding-top: 14px; margin-top: 14px;">
+                    <h2>Reference Landmarks & Hotspots</h2>
+                    <div class="hotspot-pills" id="hotspot-container">
+                        <!-- Loaded dynamically -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Model Evaluation & Metrics -->
+    <div class="modal-overlay" id="eval-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Model Evaluation Benchmarks & Metrics</h3>
+                <button class="btn-close" id="btn-close-eval">&times;</button>
+            </div>
+            
+            <h4 style="margin-bottom: 10px; color: var(--accent-glow);">Spatial Regression Holdout Benchmark (64,258 Test Samples)</h4>
+            <table class="eval-table">
+                <thead>
+                    <tr>
+                        <th>Evaluation Metric</th>
+                        <th>SpatialHarmonicNet (PyTorch)</th>
+                        <th>Spatial Ensemble (GBR + KNN)</th>
+                    </tr>
+                </thead>
+                <tbody id="eval-table-body">
+                    <!-- Populated via API -->
+                </tbody>
+            </table>
+
+            <h4 style="margin-top: 20px; margin-bottom: 10px; color: var(--accent-glow);">Global Landmark Verification</h4>
+            <table class="eval-table">
+                <thead>
+                    <tr>
+                        <th>Location</th>
+                        <th>Category</th>
+                        <th>Predicted &mu;Sv/h</th>
+                        <th>95% Normal Range</th>
+                        <th>Surge 5.0 &mu;Sv/h Test</th>
+                    </tr>
+                </thead>
+                <tbody id="landmark-table-body">
+                    <!-- Populated via API -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Initialize Map
+        const map = L.map('map', {
+            zoomControl: false,
+            minZoom: 2,
+            maxZoom: 16
+        }).setView([37.421, 141.032], 5);
+
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+        // CartoDB Dark Matter Base Tiles with crisp labels
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://safecast.org/">Safecast</a>',
+            subdomains: 'abcd',
+            maxZoom: 19
+        }).addTo(map);
+
+        let probeMarker = null;
+        let probeHalo = null;
+        let choroplethLayer = null;
+        let landmarkLayer = L.layerGroup().addTo(map);
+        let sensorSampleLayer = L.layerGroup().addTo(map);
+        let choroplethVisible = true;
+        let sensorsVisible = true;
+
+        let currentLat = 35.6938;
+        let currentLon = 139.7034;
+
+        function getDoseColor(usv) {
+            if (usv < 0.10) return '#10b981'; // Green (Normal background 0.05-0.10)
+            if (usv < 0.20) return '#06b6d4'; // Cyan (Normal/Mild 0.10-0.20)
+            if (usv < 0.35) return '#f59e0b'; // Amber (Elevated natural / Altitude 0.20-0.35)
+            if (usv < 0.60) return '#f97316'; // Orange (High natural / Contaminated 0.35-0.60)
+            return '#ef4444'; // Red (Hotspot / Exclusion > 0.60)
+        }
+
+        function getChoroplethStyle(feature) {
+            const rad = feature.properties.radiation_usv || 0.08;
+            return {
+                fillColor: getDoseColor(rad),
+                weight: 1.2,
+                opacity: 0.7,
+                color: 'rgba(255, 255, 255, 0.25)',
+                fillOpacity: 0.35
+            };
+        }
+
+        function highlightCountry(e) {
+            const layer = e.target;
+            layer.setStyle({
+                weight: 2.5,
+                color: '#00f2a6',
+                fillOpacity: 0.55
+            });
+            layer.bringToFront();
+        }
+
+        function resetHighlight(e) {
+            if (choroplethLayer) {
+                choroplethLayer.resetStyle(e.target);
+            }
+        }
+
+        // Load natural country ambient radiation choropleth
+        async function loadWorldRadiationChoropleth() {
+            try {
+                console.log("Fetching /api/world_choropleth...");
+                const resp = await fetch('/api/world_choropleth');
+                const data = await resp.json();
+                console.log("Loaded world choropleth features:", data.features ? data.features.length : 0);
+
+                if (!data.features || data.features.length === 0) return;
+
+                if (choroplethLayer) {
+                    map.removeLayer(choroplethLayer);
+                }
+
+                choroplethLayer = L.geoJSON(data, {
+                    style: getChoroplethStyle,
+                    onEachFeature: function(feature, layer) {
+                        const props = feature.properties;
+                        const rad = props.radiation_usv ? props.radiation_usv.toFixed(4) : '0.0800';
+                        const displayName = props.parent && props.parent !== props.name ? `${props.name}, ${props.parent}` : props.name;
+                        const regionType = props.type || 'Region';
+
+                        layer.bindTooltip(`
+                            <div style="font-family: sans-serif; font-size: 0.82rem; line-height: 1.4;">
+                                <strong>${displayName}</strong> <span style="font-size:0.7rem; color:#94a3b8;">(${regionType})</span><br>
+                                Regional Baseline: <strong style="color: ${getDoseColor(props.radiation_usv)}">${rad} &mu;Sv/h</strong><br>
+                                95% CI: [${props.ci_lower_usv ? props.ci_lower_usv.toFixed(3) : '0.000'}, ${props.ci_upper_usv ? props.ci_upper_usv.toFixed(3) : '0.200'}]<br>
+                                <span style="font-size: 0.72rem; color: #00f2a6;">Click to probe exact point</span>
+                            </div>
+                        `, { sticky: true });
+
+                        layer.on({
+                            mouseover: highlightCountry,
+                            mouseout: resetHighlight,
+                            click: function(e) {
+                                queryLocation(e.latlng.lat, e.latlng.lng);
+                            }
+                        });
+                    }
+                });
+
+                if (choroplethVisible) {
+                    choroplethLayer.addTo(map);
+                    if (sensorSampleLayer) sensorSampleLayer.bringToFront();
+                    if (landmarkLayer) landmarkLayer.bringToFront();
+                }
+            } catch (err) {
+                console.error("Failed to load world choropleth:", err);
+            }
+        }
+
+        async function queryLocation(lat, lon, simVal = null, simUnit = "usv") {
+            currentLat = lat;
+            currentLon = lon;
+
+            document.getElementById('lat-lon-val').innerText = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+            document.getElementById('coord-label').innerText = `${lat.toFixed(3)}°, ${lon.toFixed(3)}°`;
+
+            try {
+                // Predict spatial baseline
+                const predResp = await fetch('/api/predict', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ latitude: lat, longitude: lon, mc_samples: 1 })
+                });
+                const pred = await predResp.json();
+
+                const doseColor = getDoseColor(pred.radiation_usv);
+                const doseElem = document.getElementById('pred-dose');
+                doseElem.innerText = pred.radiation_usv.toFixed(4);
+                doseElem.style.color = doseColor;
+                doseElem.style.textShadow = `0 0 20px ${doseColor}`;
+
+                document.getElementById('pred-ci').innerText = `95% CI: [${pred.ci_lower_usv.toFixed(4)}, ${pred.ci_upper_usv.toFixed(4)}] \u03BCSv/h`;
+                document.getElementById('unc-val').innerText = `\u00B1 ${pred.uncertainty_usv.toFixed(4)} \u03BCSv/h`;
+
+                // If no sim value provided, set default sim value to predicted baseline
+                const simInput = document.getElementById('sim-value');
+                if (simVal === null) {
+                    simVal = pred.radiation_usv;
+                    simInput.value = simVal.toFixed(3);
+                }
+
+                // Check anomaly
+                const detectResp = await fetch('/api/detect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ latitude: lat, longitude: lon, value: parseFloat(simVal), unit: simUnit })
+                });
+                const detect = await detectResp.json();
+
+                // Update UI badge and description
+                const badge = document.getElementById('severity-badge');
+                badge.innerText = detect.severity;
+                badge.className = 'badge ' + getBadgeClass(detect.severity);
+
+                document.getElementById('zscore-val').innerText = `Z=${detect.z_score.toFixed(2)} (p=${detect.p_value.toExponential(2)})`;
+                document.getElementById('sim-description').innerText = `${detect.description} (Fold: ${detect.fold_increase}x)`;
+
+                // Update interactive Probe Marker & glowing Halo on map
+                updateProbeVisual(lat, lon, doseColor, detect.severity);
+            } catch (err) {
+                console.error("Inference query failed:", err);
+            }
+        }
+
+        function getBadgeClass(sev) {
+            switch(sev) {
+                case 'NORMAL': return 'badge-normal';
+                case 'ELEVATED': return 'badge-elevated';
+                case 'ANOMALY_HIGH': return 'badge-high';
+                case 'ANOMALY_CRITICAL': return 'badge-critical';
+                default: return 'badge-normal';
+            }
+        }
+
+        function updateProbeVisual(lat, lon, color, severity) {
+            if (probeMarker) map.removeLayer(probeMarker);
+            if (probeHalo) map.removeLayer(probeHalo);
+
+            const isCrit = severity === 'ANOMALY_CRITICAL' || severity === 'ANOMALY_HIGH';
+            const markerColor = isCrit ? '#ef4444' : color;
+
+            // Target Reticle Marker
+            probeMarker = L.circleMarker([lat, lon], {
+                radius: 9,
+                fillColor: markerColor,
+                color: '#ffffff',
+                weight: 3,
+                opacity: 1,
+                fillOpacity: 0.9,
+                zIndexOffset: 1000
+            }).addTo(map);
+
+            // Pulsing Halo
+            probeHalo = L.circleMarker([lat, lon], {
+                radius: 22,
+                fillColor: markerColor,
+                color: markerColor,
+                weight: 2,
+                opacity: 0.7,
+                fillOpacity: 0.25,
+                zIndexOffset: 999
+            }).addTo(map);
+        }
+
+        // Load authentic Safecast sensor samples from test set
+        async function loadSafecastSensorSamples() {
+            try {
+                sensorSampleLayer.clearLayers();
+                const resp = await fetch('/api/sensor_samples');
+                const data = await resp.json();
+
+                if (!data.samples || data.samples.length === 0) return;
+
+                data.samples.forEach(s => {
+                    const color = getDoseColor(s.measured_usv);
+                    const sensorPin = L.circleMarker([s.latitude, s.longitude], {
+                        radius: 4.5,
+                        fillColor: color,
+                        color: 'rgba(0,0,0,0.5)',
+                        weight: 1,
+                        opacity: 0.8,
+                        fillOpacity: 0.75
+                    });
+
+                    sensorPin.bindTooltip(`
+                        <div style="font-family: sans-serif; font-size: 0.75rem;">
+                            Measured: <strong>${s.measured_usv} &mu;Sv/h</strong><br>
+                            ${s.location_name ? '<span style="color:#64748b;">' + s.location_name + '</span>' : ''}
+                        </div>
+                    `, { sticky: true });
+
+                    sensorPin.on('click', (e) => {
+                        L.DomEvent.stopPropagation(e);
+                        queryLocation(s.latitude, s.longitude, s.measured_usv, 'usv');
+                    });
+
+                    sensorSampleLayer.addLayer(sensorPin);
+                });
+            } catch (err) {
+                console.error("Failed to load sensor samples:", err);
+            }
+        }
+
+        // Load reference landmarks and place clear distinct badges
+        async function loadLandmarks() {
+            try {
+                landmarkLayer.clearLayers();
+                const resp = await fetch('/api/hotspots');
+                const data = await resp.json();
+                const container = document.getElementById('hotspot-container');
+                container.innerHTML = '';
+
+                data.hotspots.forEach(site => {
+                    // Pill button in sidebar
+                    const pill = document.createElement('div');
+                    pill.className = 'hotspot-pill';
+                    pill.innerText = site.name;
+                    pill.title = site.description;
+                    pill.addEventListener('click', () => {
+                        document.querySelectorAll('.hotspot-pill').forEach(p => p.classList.remove('active'));
+                        pill.classList.add('active');
+                        map.flyTo([site.latitude, site.longitude], 9, { duration: 1.5 });
+                        queryLocation(site.latitude, site.longitude);
+                    });
+                    container.appendChild(pill);
+
+                    // Add prominent landmark pin on map
+                    const color = getDoseColor(site.predicted_usv);
+                    const landmarkPin = L.circleMarker([site.latitude, site.longitude], {
+                        radius: 8,
+                        fillColor: color,
+                        color: '#ffffff',
+                        weight: 2.5,
+                        opacity: 1,
+                        fillOpacity: 0.9
+                    });
+
+                    landmarkPin.bindPopup(`
+                        <div style="color: #111; font-size: 0.85rem; font-family: sans-serif; min-width: 190px;">
+                            <strong style="font-size: 0.95rem;">${site.name}</strong><br>
+                            <span style="display:inline-block; padding: 2px 6px; border-radius: 4px; background: #e2e8f0; font-size: 0.72rem; margin: 4px 0;">${site.category}</span><br>
+                            Predicted Baseline: <strong style="color: #0f766e;">${site.predicted_usv.toFixed(4)} &mu;Sv/h</strong><br>
+                            95% CI: [${site.ci_lower_usv.toFixed(3)}, ${site.ci_upper_usv.toFixed(3)}]<br>
+                            <div style="color: #64748b; font-size: 0.78rem; margin-top: 4px;">${site.description}</div>
+                        </div>
+                    `);
+                    landmarkPin.on('click', () => queryLocation(site.latitude, site.longitude));
+                    landmarkLayer.addLayer(landmarkPin);
+                });
+            } catch (err) {
+                console.error("Failed to load landmarks:", err);
+            }
+        }
+
+        // Load Evaluation Summary into Modal
+        async function loadEvaluationSummary() {
+            try {
+                const resp = await fetch('/api/info');
+                const data = await resp.json();
+                const evalSum = data.evaluation_summary;
+
+                if (!evalSum || !evalSum.spatial_harmonic_net) return;
+
+                const nn = evalSum.spatial_harmonic_net;
+                const ens = evalSum.spatial_ensemble || {};
+
+                const evalBody = document.getElementById('eval-table-body');
+                evalBody.innerHTML = `
+                    <tr><td><strong>95% CI Coverage (PICP)</strong></td><td><strong style="color: #10b981;">${(nn.picp_95 * 100).toFixed(1)}%</strong></td><td>${(ens.picp_95 * 100).toFixed(1)}%</td></tr>
+                    <tr><td><strong>Median Absolute Error (&mu;Sv/h)</strong></td><td><strong style="color: #10b981;">${nn.medae_usv.toFixed(4)} &mu;Sv/h</strong></td><td>${ens.medae_usv.toFixed(4)} &mu;Sv/h</td></tr>
+                    <tr><td><strong>MAE (log-space)</strong></td><td>${nn.mae_log.toFixed(4)}</td><td>${ens.mae_log.toFixed(4)}</td></tr>
+                    <tr><td><strong>RMSE (log-space)</strong></td><td>${nn.rmse_log.toFixed(4)}</td><td>${ens.rmse_log.toFixed(4)}</td></tr>
+                    <tr><td><strong>Mean CI Width (&mu;Sv/h)</strong></td><td>${nn.mpiw_usv.toFixed(4)} &mu;Sv/h</td><td>${ens.mpiw_usv.toFixed(4)} &mu;Sv/h</td></tr>
+                    <tr><td><strong>Test Sample Count</strong></td><td>${nn.sample_count.toLocaleString()}</td><td>${ens.sample_count.toLocaleString()}</td></tr>
+                `;
+
+                const lmBody = document.getElementById('landmark-table-body');
+                lmBody.innerHTML = '';
+                const hotspots = evalSum.hotspot_benchmarks || {};
+                for (let [k, h] of Object.entries(hotspots)) {
+                    const row = document.createElement('tr');
+                    const isSurgeCrit = h.test_surge_severity === 'ANOMALY_CRITICAL' || h.test_surge_severity === 'ANOMALY_HIGH';
+                    const surgeColor = isSurgeCrit ? '#ef4444' : '#f59e0b';
+                    row.innerHTML = `
+                        <td><strong>${h.name.replace(/_/g, ' ')}</strong></td>
+                        <td><span class="badge" style="background: rgba(255,255,255,0.08); color: #94a3b8;">${h.category}</span></td>
+                        <td style="color: ${getDoseColor(h.predicted_usv)}; font-weight: 600;">${h.predicted_usv.toFixed(4)}</td>
+                        <td>[${h.ci_lower_usv.toFixed(3)}, ${h.ci_upper_usv.toFixed(3)}]</td>
+                        <td><span style="color: ${surgeColor}; font-weight: 600;">${h.test_surge_severity} (Z=${h.test_surge_z})</span></td>
+                    `;
+                    lmBody.appendChild(row);
+                }
+            } catch (e) {
+                console.error("Failed to load evaluation summary:", e);
+            }
+        }
+
+        // Toggle Choropleth Layer
+        document.getElementById('btn-toggle-choropleth').addEventListener('click', function() {
+            choroplethVisible = !choroplethVisible;
+            if (choroplethVisible) {
+                if (choroplethLayer) map.addLayer(choroplethLayer);
+                this.innerText = 'Hide Regional Tint';
+            } else {
+                if (choroplethLayer) map.removeLayer(choroplethLayer);
+                this.innerText = 'Show Regional Tint';
+            }
+        });
+
+        // Toggle Sensor Layer
+        document.getElementById('btn-toggle-sensors').addEventListener('click', function() {
+            sensorsVisible = !sensorsVisible;
+            if (sensorsVisible) {
+                map.addLayer(sensorSampleLayer);
+                this.innerText = 'Hide Safecast Sensors';
+            } else {
+                map.removeLayer(sensorSampleLayer);
+                this.innerText = 'Show Safecast Sensors';
+            }
+        });
+
+        // Modal Controls
+        const modal = document.getElementById('eval-modal');
+        document.getElementById('btn-open-eval').addEventListener('click', () => modal.style.display = 'flex');
+        document.getElementById('btn-close-eval').addEventListener('click', () => modal.style.display = 'none');
+        modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
+
+        // Map Click
+        map.on('click', function(e) {
+            queryLocation(e.latlng.lat, e.latlng.lng);
+        });
+
+        // Simulate Button
+        document.getElementById('btn-simulate').addEventListener('click', function() {
+            const val = parseFloat(document.getElementById('sim-value').value);
+            const unit = document.getElementById('sim-unit').value;
+            queryLocation(currentLat, currentLon, val, unit);
+        });
+
+        // Initialize
+        loadWorldRadiationChoropleth();
+        queryLocation(currentLat, currentLon);
+        loadLandmarks();
+        loadSafecastSensorSamples();
+        loadEvaluationSummary();
+    </script>
+</body>
+</html>
