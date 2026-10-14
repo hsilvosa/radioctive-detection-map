@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Global radiation anomaly map</title>
+  <meta name="description" content="A neural network trained on Safecast measurements estimates the normal radiation dose rate anywhere on Earth and scores a reading against it. The model runs in your browser.">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Global radiation anomaly map</h1>
+    <p class="meta">
+      <a href="https://hsilvosa.com/projects/radiation-anomaly-map/">Write-up</a> &middot;
+      <a href="https://github.com/hsilvosa/radioctive-detection-map">Code</a> &middot;
+      <a href="https://huggingface.co/datasets/hsilvosa/safecast-radiation">Safecast data</a>
+    </p>
+  </header>
+
+  <main>
+    <p class="lede">
+      A small neural network learned what ambient radiation is <em>normal</em> at any point on Earth from
+      Safecast volunteer measurements. Pick a place, type a reading, and see how surprising it is. The network
+      runs in your browser; nothing here is a live sensor feed.
+    </p>
+
+    <div class="stage">
+      <section class="mapcol" aria-label="Map">
+        <div class="mapbox">
+          <div id="map" role="application" aria-label="Interactive map. Click to choose a location."></div>
+          <div id="busy" class="busy" hidden>Computing</div>
+          <div id="fail" class="busy fail" hidden></div>
+        </div>
+        <div class="mapbar">
+          <fieldset class="modes">
+            <legend>Colour the map by</legend>
+            <label><input type="radio" name="mode" value="baseline" checked> Expected dose rate</label>
+            <label><input type="radio" name="mode" value="uncertainty"> Model uncertainty</label>
+            <label><input type="radio" name="mode" value="surprise"> Where your reading is unusual</label>
+          </fieldset>
+          <label class="check"><input type="checkbox" id="samples-toggle" checked> Real readings from the test split</label>
+        </div>
+        <div class="legend" id="legend"></div>
+        <p class="caption" id="caption">Loading the model.</p>
+      </section>
+
+      <aside class="panel">
+        <section aria-live="polite">
+          <h2>Location</h2>
+          <p class="place" id="place">Click the map.</p>
+          <p class="sentence" id="expect"></p>
+        </section>
+
+        <section>
+          <h2>Reading</h2>
+          <div class="reading">
+            <input type="range" id="reading-range" min="0" max="1000" step="1" aria-label="Reading, logarithmic scale">
+            <div class="reading-row">
+              <input type="number" id="reading-num" min="0" step="any" inputmode="decimal" aria-label="Reading value">
+              <select id="reading-unit" aria-label="Unit">
+                <option value="usv">&micro;Sv/h</option>
+                <option value="cpm">CPM</option>
+              </select>
+            </div>
+            <div class="chips" id="chips"></div>
+          </div>
+        </section>
+
+        <section aria-live="polite">
+          <h2>How surprising</h2>
+          <svg id="chart" viewBox="0 0 340 150" role="img" aria-label="Distribution of expected readings with the current reading marked"></svg>
+          <div id="verdict" class="verdict"></div>
+        </section>
+
+        <section>
+          <h2>Reference sites</h2>
+          <p class="hint">Verdict for the reading above at each site. Select one to go there.</p>
+          <table class="sites" id="sites"><tbody></tbody></table>
+        </section>
+
+        <section class="note">
+          <h2>Read this first</h2>
+          <p id="limits"></p>
+        </section>
+      </aside>
+    </div>
+  </main>
+
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script src="model.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
