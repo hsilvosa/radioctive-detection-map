@@ -54,6 +54,23 @@ radiation-map/
     └── test_inference.py
 ```
 
+## Static Demo
+
+`demo/` is a self-contained static site: the trained `SpatialHarmonicNet` runs in the browser (plain JavaScript in web workers, no server and no ML runtime), so it can be hosted on any static host. It colours the current map view with the model, scores a reading you type against any point, and replays real readings from the held-out test split.
+
+```bash
+# Export weights and demo data (needs the checkpoint and the test split)
+PYTHONPATH=src python scripts/export_demo.py
+
+# Check the JavaScript forward pass against PyTorch (max difference ~1e-5)
+node demo/parity.test.mjs
+
+# Serve locally
+python -m http.server 8000 --directory demo
+```
+
+The page ships about 3 MB: 1.6 MB of weights, Natural Earth land and borders via [world-atlas](https://github.com/topojson/world-atlas) (ISC), and Leaflet. There are no external requests.
+
 ## Installation
 
 Clone the repository and install with pip:
