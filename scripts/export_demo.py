@@ -6,7 +6,10 @@ Writes into demo/:
   data/parity.json      reference outputs from PyTorch, used to check the JS port
   data/landmarks.json   reference sites
   data/samples.json     measured readings sampled from the held-out test split
+  data/coverage.json    sample counts per 2 degree cell (all splits), base64 uint8
 """
+
+import base64
 
 import argparse
 import json
@@ -158,6 +161,32 @@ def main():
         ]
         (out / "data" / "samples.json").write_text(json.dumps(rows), encoding="utf-8")
         print(f"samples: {len(rows)} of {len(df)} test rows")
+
+    parts = [Path(args.test).with_name(f"radiation_{n}.parquet") for n in ("train", "val", "test")]
+    frames = [pd.read_parquet(f, columns=["latitude", "longitude"]) for f in parts if f.exists()]
+    if frames:
+        pts = pd.concat(frames)
+        cell = 2
+        rows, cols = 180 // cell, 360 // cell
+        iy = ((pts.latitude.clip(-89.999, 89.999) + 90) // cell).astype(int)
+        ix = ((pts.longitude.clip(-179.999, 179.999) + 180) // cell).astype(int)
+        counts = np.zeros((rows, cols), dtype=np.int64)
+        np.add.at(counts, (iy.to_numpy(), ix.to_numpy()), 1)
+        # Counts saturate at 255 after a log squeeze; the page only needs relative support.
+        packed = np.minimum(255, np.round(np.log1p(counts) / np.log1p(counts.max()) * 255)).astype(np.uint8)
+        (out / "data" / "coverage.json").write_text(
+            json.dumps(
+                {
+                    "cell": cell,
+                    "rows": rows,
+                    "cols": cols,
+                    "max_count": int(counts.max()),
+                    "data": base64.b64encode(packed.tobytes()).decode("ascii"),
+                }
+            ),
+            encoding="utf-8",
+        )
+        print(f"coverage: {len(pts)} points, {(counts > 0).sum()} of {rows * cols} cells occupied")
 
     print(f"weights: {packer.size} floats ({packer.size * 4 / 1e6:.2f} MB)")
 

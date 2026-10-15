@@ -54,6 +54,7 @@ h2 { margin: 0 0 8px; font: 500 12px var(--ui); letter-spacing: .06em; text-tran
 .place { margin: 0; font: 400 13px var(--mono); }
 .sentence { margin: 6px 0 0; font: 500 18px/1.4 var(--serif); min-height: 2.8em; }
 .n { font-family: var(--mono); font-size: .84em; font-weight: 500; color: var(--accent); white-space: nowrap; }
+.nearby { margin: 4px 0 0; font-size: 13px; color: var(--muted); min-height: 1.5em; }
 .hint { margin: 0 0 6px; font-size: 12px; color: var(--muted); }
 
 .reading input[type=range] { width: 100%; }

@@ -8,7 +8,7 @@
   const state = {
     manifest: null,
     probe: null, // {lat, lon, mu, logvar, label}
-    readingUsv: 0.2,
+    readingUsv: 0.5,
     unit: "usv",
     mode: "baseline",
     grid: null,
@@ -182,10 +182,13 @@
   /* ---------- colour ---------- */
 
   const RAMP = [
-    [0, [34, 48, 59]],
-    [0.5, [91, 122, 138]],
-    [1, [217, 164, 65]],
+    [0, [38, 66, 98]],
+    [0.3, [47, 125, 140]],
+    [0.62, [196, 176, 84]],
+    [0.85, [217, 130, 60]],
+    [1, [214, 84, 70]],
   ];
+  const LAND = [23, 29, 35];
 
   function ramp(t) {
     t = Math.min(1, Math.max(0, t));
@@ -200,17 +203,44 @@
     return RAMP[RAMP.length - 1][1];
   }
 
-  const DOSE_LO = Math.log(0.03);
+  const DOSE_LO = Math.log(0.04);
   const DOSE_HI = Math.log(0.45);
   const doseT = (v) => (Math.log(Math.max(v, 1e-6)) - DOSE_LO) / (DOSE_HI - DOSE_LO);
+  /* Where the model has seen data: bilinear lookup on the 2 degree coverage grid. */
+  let coverage = null;
+  function support(lat, lon) {
+    if (!coverage) return 1;
+    const { cell, rows, cols, bytes } = coverage;
+    const u = Math.min(cols - 1, Math.max(0, (lon + 180) / cell - 0.5));
+    const v = Math.min(rows - 1, Math.max(0, (lat + 90) / cell - 0.5));
+    const i0 = Math.floor(u);
+    const j0 = Math.floor(v);
+    const i1 = Math.min(cols - 1, i0 + 1);
+    const j1 = Math.min(rows - 1, j0 + 1);
+    const fx = u - i0;
+    const fy = v - j0;
+    const at = (j, i) => bytes[j * cols + i] / 255;
+    return (
+      at(j0, i0) * (1 - fx) * (1 - fy) + at(j0, i1) * fx * (1 - fy) + at(j1, i0) * (1 - fx) * fy + at(j1, i1) * fx * fy
+    );
+  }
+  function trust(v) {
+    const t = Math.min(1, Math.max(0, (v - 0.03) / (0.4 - 0.03)));
+    return t * t * (3 - 2 * t);
+  }
+  const fade = (c, t) => {
+    const k = 0.1 + 0.9 * t;
+    return [0, 1, 2].map((i) => Math.round(LAND[i] + (c[i] - LAND[i]) * k));
+  };
+
   const SIGMA_LO = 0.15;
   const SIGMA_HI = 1.5;
 
   const SURPRISE = {
-    NORMAL: [46, 62, 75, 120],
-    ELEVATED: [217, 164, 65, 160],
-    ANOMALY_HIGH: [212, 121, 90, 200],
-    ANOMALY_CRITICAL: [224, 85, 74, 230],
+    NORMAL: [44, 58, 70, 235],
+    ELEVATED: [217, 164, 65, 235],
+    ANOMALY_HIGH: [212, 121, 90, 235],
+    ANOMALY_CRITICAL: [224, 85, 74, 235],
   };
 
   /* ---------- map ---------- */
@@ -304,13 +334,22 @@
     const d = img.data;
     const thr = state.manifest.thresholds;
     const obsLog = M.toLog(state.readingUsv);
+    const yN = merc(g.north);
+    const yS = merc(g.south);
     for (let i = 0; i < g.mu.length; i++) {
       let c;
+      const row = Math.floor(i / g.C);
+      const lat = invMerc(yN + ((row + 0.5) / g.R) * (yS - yN));
+      const lon = g.west + (((i % g.C) + 0.5) / g.C) * (g.east - g.west);
+      const sup = support(lat, lon);
+      const tr = trust(sup);
       if (state.mode === "baseline") {
-        c = [...ramp(doseT(M.fromLog(g.mu[i]))), 215];
+        c = [...fade(ramp(doseT(M.fromLog(g.mu[i]))), tr), 235];
       } else if (state.mode === "uncertainty") {
         const s = Math.exp(0.5 * g.logvar[i]);
-        c = [...ramp((s - SIGMA_LO) / (SIGMA_HI - SIGMA_LO)), 215];
+        c = [...ramp((s - SIGMA_LO) / (SIGMA_HI - SIGMA_LO)), 235];
+      } else if (state.mode === "coverage") {
+        c = [...ramp(Math.min(1, sup / 0.8)), 235];
       } else {
         const z = (obsLog - g.mu[i]) / Math.max(Math.exp(0.5 * g.logvar[i]), 1e-4);
         const sev =
@@ -321,7 +360,8 @@
               : z >= thr.normal_z_max
                 ? "ELEVATED"
                 : "NORMAL";
-        c = SURPRISE[sev];
+        const sc = SURPRISE[sev];
+        c = [...fade(sc, tr), sc[3]];
       }
       d[4 * i] = c[0];
       d[4 * i + 1] = c[1];
@@ -341,7 +381,7 @@
     big.width = Wc;
     big.height = Hc;
     const ctx = big.getContext("2d");
-    ctx.imageSmoothingEnabled = state.mode !== "surprise";
+    ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(small, 0, 0, Wc, Hc);
 
@@ -500,7 +540,46 @@
       `The model expects <span class="n">${fmt(s.expected)} &micro;Sv/h</span> here. ` +
       `95% of readings should fall between <span class="n">${fmt(s.lower)}</span> and <span class="n">${fmt(s.upper)}</span>.` +
       (wide ? " That range is wide: the model is unsure about this area." : "");
+    renderNearby(pr, s);
     renderVerdict();
+    saveHash();
+  }
+
+  /* Real readings from the test split close to the probe, as a sanity check on the baseline. */
+  function renderNearby(pr, s) {
+    const near = [];
+    for (const [lat, lon, usv] of state.samples) {
+      if (Math.abs(lat - pr.lat) < 1.2 && haversineKm(pr.lat, pr.lon, lat, lon) <= 100) near.push(usv);
+    }
+    const el = $("#nearby");
+    if (near.length < 3) {
+      el.textContent = near.length
+        ? `Only ${near.length} real reading${near.length > 1 ? "s" : ""} in the test split within 100 km.`
+        : "No real readings in the test split within 100 km: this value is extrapolated.";
+      return;
+    }
+    near.sort((a, b) => a - b);
+    const med = near[Math.floor(near.length / 2)];
+    const inside = near.filter((v) => v >= s.lower && v <= s.upper).length;
+    el.innerHTML =
+      `${near.length} real readings within 100 km: median <span class="n">${fmt(med)}</span>, ` +
+      `${Math.round((100 * inside) / near.length)}% inside that range.`;
+  }
+
+  function saveHash() {
+    const pr = state.probe;
+    if (!pr) return;
+    const h = `#${pr.lat.toFixed(3)},${pr.lon.toFixed(3)},${Number(state.readingUsv.toPrecision(3))},${state.mode}`;
+    history.replaceState(null, "", h);
+  }
+
+  function readHash() {
+    const m = /^#(-?[\d.]+),(-?[\d.]+),([\d.eE+-]+),(\w+)$/.exec(location.hash);
+    if (!m) return null;
+    const out = { lat: +m[1], lon: +m[2], reading: +m[3], mode: m[4] };
+    if (![out.lat, out.lon, out.reading].every(isFinite) || out.reading <= 0) return null;
+    if (!["baseline", "uncertainty", "surprise", "coverage"].includes(out.mode)) out.mode = "baseline";
+    return out;
   }
 
   function describe(sc, s) {
@@ -661,6 +740,7 @@
         state.mode = e.target.value;
         renderLegend();
         render();
+        saveHash();
       })
     );
     $("#samples-toggle").addEventListener("change", (e) => {
@@ -679,9 +759,13 @@
       );
     };
     if (state.mode === "baseline") {
-      el.innerHTML = grad(["0.03", "0.1", "0.45+"]) + "<span>expected dose rate, &micro;Sv/h</span>";
+      el.innerHTML =
+        grad(["0.04", "0.15", "0.45+"]) +
+        "<span>expected dose rate, &micro;Sv/h. Faded where the model saw little data</span>";
     } else if (state.mode === "uncertainty") {
       el.innerHTML = grad(["0.15", "0.8", "1.5"]) + "<span>model uncertainty (sigma in log space); lighter means less sure</span>";
+    } else if (state.mode === "coverage") {
+      el.innerHTML = grad(["none", "some", "dense"]) + "<span>how many Safecast samples the model was fitted on, per area</span>";
     } else {
       const t = state.manifest.thresholds;
       const sw = (c, label) => `<span class="swatch"><i style="background:rgba(${c[0]},${c[1]},${c[2]},${c[3] / 255})"></i>${label}</span>`;
@@ -755,10 +839,10 @@
       const m = L.circleMarker([lat, lon], {
         renderer: sampleRenderer,
         pane: "samples",
-        radius: 3.2,
-        weight: 0.8,
-        color: "#e9e6df",
-        opacity: 0.8,
+        radius: 3.8,
+        weight: 1.4,
+        color: "#101418",
+        opacity: 0.95,
         fillColor: `rgb(${r},${g},${b})`,
         fillOpacity: 0.95,
         bubblingMouseEvents: false,
@@ -803,16 +887,39 @@
         })
         .catch(showFailure);
 
+      fetch("data/coverage.json")
+        .then((r) => r.json())
+        .then((c) => {
+          const bin = atob(c.data);
+          const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          coverage = { cell: c.cell, rows: c.rows, cols: c.cols, bytes };
+          render();
+        })
+        .catch(showFailure);
+
       await loadSites();
-      loadSamples();
+      await loadSamples();
+      const saved = readHash();
+      if (saved) {
+        state.mode = saved.mode;
+        state.readingUsv = saved.reading;
+        document.querySelector(`input[name="mode"][value="${saved.mode}"]`).checked = true;
+        renderLegend();
+      }
       setReading(state.readingUsv, null);
       map.on("click", (e) => setProbe(e.latlng.lat, e.latlng.lng));
       map.on("moveend", () => {
         clearTimeout(refreshTimer);
         refreshTimer = setTimeout(refresh, 150);
       });
-      const fuku = state.sites.find((s) => s.id === "Fukushima_Daiichi");
-      await setProbe(fuku.latitude, fuku.longitude, { label: fuku.description });
+      if (saved) {
+        map.setView([saved.lat, saved.lon], 5, { animate: false });
+        await setProbe(saved.lat, saved.lon);
+      } else {
+        const fuku = state.sites.find((s) => s.id === "Fukushima_Daiichi");
+        await setProbe(fuku.latitude, fuku.longitude, { label: fuku.description });
+      }
       refresh();
     } catch (err) {
       showFailure(err);

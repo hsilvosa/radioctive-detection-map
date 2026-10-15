@@ -47,3 +47,6 @@ wheels/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Wrangler
+.wrangler/
